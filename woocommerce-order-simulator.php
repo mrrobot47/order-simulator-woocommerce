@@ -1,13 +1,9 @@
 <?php
  /**
-  * Plugin Name: Order Simulator for WooCommerce
-  * Plugin URI: http://www.75nineteen.com
+  * Plugin Name: Standard Order Simulator for WooCommerce
   * Description: Automate orders to generate WooCommerce storefronts at scale for testing purposes.
-  * Version: 1.0.1
-  * Author: 75nineteen Media LLC
-  * Author URI: http://www.75nineteen.com
-
-  * Copyright 2015 75nineteen Media LLC.  (email : scott@75nineteen.com)
+  * Version: 1.0.0
+  * Author: Riddhesh Sanghvi
   * 
   * This program is free software: you can redistribute it and/or modify
   * it under the terms of the GNU General Public License as published by
@@ -29,31 +25,19 @@ class WC_Order_Simulator {
     public $settings = array();
 
     public function __construct() {
+      if ( defined( 'ABSPATH' ) ) {
+        
         register_activation_hook( __FILE__, array($this, 'install') );
-
-        add_filter( 'cron_schedules', array($this, 'add_cron_schedule') );
 
         add_filter( 'woocommerce_get_settings_pages', array($this, 'settings_page') );
 
-        add_action( 'wcos_create_orders', array($this, 'create_orders_on_init') );
         $this->settings = self::get_settings();
+      }
 
-    }
-
-    public function add_cron_schedule( $schedules ) {
-        $schedules['ten_minutes'] = array(
-            'interval' => 600,
-            'display' => __('Ten Minutes')
-        );
-        return $schedules;
     }
 
     public function install() {
         global $wpdb;
-
-        if ( ! wp_next_scheduled( 'wcos_create_orders' ) ) {
-            wp_schedule_event( time(), 'hourly', 'wcos_create_orders' );
-        }
 
         $wpdb->hide_errors();
         $collate = '';
@@ -102,6 +86,9 @@ PRIMARY KEY  (number)
             foreach ( $lines as $sql )
                 $wpdb->query($sql);
         }
+      
+      self::create_user();
+      self::create_orders_on_init();
     }
 
     public function settings_page( $settings ) {
@@ -111,27 +98,25 @@ PRIMARY KEY  (number)
     }
 
     public function create_orders_on_init() {
-        //add_action( 'init', array($this, 'create_orders') );
         $this->create_orders();
     }
 
     public static function get_settings() {
-        $settings = get_option( 'wc_order_simulator_settings', array() );
+        
         $defaults = array(
             'orders_per_hour'       => 200,
-            'products'              => array(),
+            'products'              => array('1496','1492','1501','1502','1509'),
             'min_order_products'    => 1,
             'max_order_products'    => 5,
-            'create_users'          => true,
+            'create_users'          => false,
             'payment_method'        => 'auto',
             'shipping_method'       => 'auto',
             'order_completed_pct'   => 90,
             'order_processing_pct'  => 5,
             'order_failed_pct'      => 5
         );
-        $settings = wp_parse_args( $settings, $defaults );
-
-        return $settings;
+        
+        return $defaults;
     }
 
     public function create_orders() {
@@ -167,33 +152,15 @@ PRIMARY KEY  (number)
 
         $product_ids = $this->settings['products'];
 
-        if ( empty( $product_ids ) ) {
-            $products = $wpdb->get_col("SELECT ID FROM {$wpdb->prefix}posts WHERE post_type = 'product'");
-
-            foreach ( $products as $product_id ) {
-                $product_ids[] = $product_id;
-            }
-        }
-
         for ( $x = 0; $x < $this->settings['orders_per_hour']; $x++ ) {
-            $cart           = array();
-            $num_products   = rand( $this->settings['min_order_products'], $this->settings['max_order_products'] );
+            $cart           = array();          
+            $num_products   = ($x%5)+1;
             $create_user    = false;
 
-            if ( $this->settings['create_users'] ) {
-                $create_user = ( rand( 1, 100 ) <= 50 ) ? true : false;
-            }
-
-            if ( $create_user ) {
-                $user_id = self::create_user();
-            } else {
-                $user_id = self::get_random_user();
-            }
-
-            // add random products to cart
+            $user_id = self::get_random_user($x);
+          
             for ( $i = 0; $i < $num_products; $i++ ) {
-                $idx = rand(0, count($product_ids)-1);
-                $product_id = $product_ids[$idx];
+                $product_id = $product_ids[$i];
                 $woocommerce->cart->add_to_cart( $product_id, 1 );
             }
 
@@ -248,7 +215,7 @@ PRIMARY KEY  (number)
 
                 // figure out the order status
                 $status = 'completed';
-                $rand = mt_rand(1, 100);
+                $rand = $x%100;
                 $completed_pct  = $this->settings['order_completed_pct']; // e.g. 90
                 $processing_pct = $completed_pct + $this->settings['order_processing_pct']; // e.g. 90 + 5
                 $failed_pct     = $processing_pct + $this->settings['order_failed_pct']; // e.g. 95 + 5
@@ -279,62 +246,66 @@ PRIMARY KEY  (number)
 
         $user_id = 0;
 
-        do {
-            $user_row = $wpdb->get_row("SELECT * FROM fakenames ORDER BY RAND() LIMIT 1");
+        for($i=5;$i<105;$i++){
+              $user_row = $wpdb->get_row("SELECT * FROM fakenames where number=$i");
 
-            $count = $wpdb->get_var("SELECT COUNT(*) FROM {$wpdb->prefix}users WHERE user_login = '{$user_row->username}'");
+              $count = $wpdb->get_var("SELECT COUNT(*) FROM {$wpdb->prefix}users WHERE user_login = '{$user_row->username}'");
 
-            $unique = ($count == 0) ? true : false;
-        } while (! $unique);
+              $unique = ($count == 0) ? true : false;
+            if(!$unique){
+              continue;
+            }else{
+              echo "Creating user: $user_row->username.".PHP_EOL;
+            }
 
 
-        $user = array(
-            'user_login'    => $user_row->username,
-            'user_pass'     => '75nineteen',
-            'user_email'    => $user_row->emailaddress,
-            'first_name'    => $user_row->givenname,
-            'last_name'     => $user_row->surname,
-            'role'          => 'customer'
-        );
 
-        $user_id = wp_insert_user( $user );
+          $user = array(
+              'user_login'    => $user_row->username,
+              'user_pass'     => 'admin',
+              'user_email'    => $user_row->emailaddress,
+              'first_name'    => $user_row->givenname,
+              'last_name'     => $user_row->surname,
+              'role'          => 'customer'
+          );
 
-        // billing/shipping address
-        $meta = array(
-            'billing_country'       => $user_row->country,
-            'billing_first_name'    => $user_row->givenname,
-            'billing_last_name'     => $user_row->surname,
-            'billing_address_1'     => $user_row->streetaddress,
-            'billing_city'          => $user_row->city,
-            'billing_state'         => $user_row->state,
-            'billing_postcode'      => $user_row->zipcode,
-            'billing_email'         => $user_row->emailaddress,
-            'billing_phone'         => $user_row->telephonenumber,
-            'shipping_country'      => $user_row->country,
-            'shipping_first_name'   => $user_row->givenname,
-            'shipping_last_name'    => $user_row->surname,
-            'shipping_address_1'    => $user_row->streetaddress,
-            'shipping_city'         => $user_row->city,
-            'shipping_state'        => $user_row->state,
-            'shipping_postcode'     => $user_row->zipcode,
-            'shipping_email'        => $user_row->emailaddress,
-            'shipping_phone'        => $user_row->telephonenumber
-        );
+          $user_id = wp_insert_user( $user );
 
-        foreach ($meta as $key => $value) {
-            update_user_meta( $user_id, $key, $value );
+          // billing/shipping address
+          $meta = array(
+              'billing_country'       => $user_row->country,
+              'billing_first_name'    => $user_row->givenname,
+              'billing_last_name'     => $user_row->surname,
+              'billing_address_1'     => $user_row->streetaddress,
+              'billing_city'          => $user_row->city,
+              'billing_state'         => $user_row->state,
+              'billing_postcode'      => $user_row->zipcode,
+              'billing_email'         => $user_row->emailaddress,
+              'billing_phone'         => $user_row->telephonenumber,
+              'shipping_country'      => $user_row->country,
+              'shipping_first_name'   => $user_row->givenname,
+              'shipping_last_name'    => $user_row->surname,
+              'shipping_address_1'    => $user_row->streetaddress,
+              'shipping_city'         => $user_row->city,
+              'shipping_state'        => $user_row->state,
+              'shipping_postcode'     => $user_row->zipcode,
+              'shipping_email'        => $user_row->emailaddress,
+              'shipping_phone'        => $user_row->telephonenumber
+          );
+
+          foreach ($meta as $key => $value) {
+              update_user_meta( $user_id, $key, $value );
+          }
         }
-
-        return $user_id;
     }
 
-    public function get_random_user() {
+    public function get_random_user($x) {
         if ( !$this->users ) {
-            $this->users  = get_users( array('role' => 'Subscriber', 'fields' => 'ID') );
+            $this->users  = get_users( array('role' => 'Customer', 'fields' => 'ID') );
         }
 
         $length = count($this->users);
-        $idx    = rand(0, $length-1);
+        $idx    = ($x%75)+1;
 
         return $this->users[$idx];
     }
