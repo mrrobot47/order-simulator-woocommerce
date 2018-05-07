@@ -12,4 +12,5 @@ foreach($logs as $log){
   }
 }
 $avg_time = (float)$total_time/$total_run;
-echo $avg_time;
+echo 'Avg time: ' . $avg_time;
+echo 'Total Queries: '. $total_run;
