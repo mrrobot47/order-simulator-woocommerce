@@ -104,7 +104,7 @@ PRIMARY KEY  (number)
     public static function get_settings() {
         
         $defaults = array(
-            'orders_per_hour'       => 200,
+            'orders_per_hour'       => 500,
             'products'              => array('1496','1492','1501','1502','1509'),
             'min_order_products'    => 1,
             'max_order_products'    => 5,
@@ -305,7 +305,7 @@ PRIMARY KEY  (number)
         }
 
         $length = count($this->users);
-        $idx    = ($x%75)+1;
+        $idx    = ($x%100)+1;
 
         return $this->users[$idx];
     }
